@@ -74,6 +74,7 @@ def gkern(l,sigx,sigy):
 # Generate the super resolution image with points equating to the cluster number
 def generate_SR(coords,clusters):
     SR_plot=np.zeros((image_width*scale,image_height*scale),dtype=float)
+    SR_plot_clu=np.zeros((image_width*scale,image_height*scale),dtype=float)
     j=0
     for i in clusters:
         if i>-1:
@@ -84,14 +85,17 @@ def generate_SR(coords,clusters):
             scale_ycoord=round(ycoord*scale)
             # if(scale_xcoord<image_width and scale_ycoord<image_height):
             SR_plot[scale_xcoord,scale_ycoord]+=1
+            SR_plot_clu[scale_xcoord,scale_ycoord]=i
             
         j+=1
-    return SR_plot
+    return SR_plot,SR_plot_clu
 
 # Generate SR image with width = precision
 def generate_SR_prec(coords,clusters):
 
     SR_prec_plot=np.zeros((image_width*scale,image_height*scale),dtype=float)
+    SR_prec_clu_plot=np.zeros((image_width*scale,image_height*scale),dtype=float)
+    SR_prec_clu_counter=np.zeros((image_width*scale,image_height*scale),dtype=float)
     j=0
     for i in clusters:
         if i>-1:
@@ -107,10 +111,21 @@ def generate_SR_prec(coords,clusters):
             gauss_to_add=gkern(20,sigmax,sigmay)
             # if((scale_xcoord+10)<image_width and (scale_ycoord+10)<image_height and (scale_xcoord-10)>0 and (scale_ycoord-10)>0):
             SR_prec_plot[scale_xcoord-10:scale_xcoord+10,scale_ycoord-10:scale_ycoord+10]=SR_prec_plot[scale_xcoord-10:scale_xcoord+10,scale_ycoord-10:scale_ycoord+10]+gauss_to_add
-            
+           
+           
+           
+            half_maximum=gauss_to_add.max()/2.0
+            gauss_FWHM=gauss_to_add>=half_maximum
+            gauss_to_add_clu=gauss_FWHM*i
+            SR_prec_clu_plot[scale_xcoord-10:scale_xcoord+10,scale_ycoord-10:scale_ycoord+10]=SR_prec_clu_plot[scale_xcoord-10:scale_xcoord+10,scale_ycoord-10:scale_ycoord+10]+gauss_to_add_clu
+            SR_prec_clu_counter[scale_xcoord-10:scale_xcoord+10,scale_ycoord-10:scale_ycoord+10]=SR_prec_clu_counter[scale_xcoord-10:scale_xcoord+10,scale_ycoord-10:scale_ycoord+10]+gauss_FWHM
+        
+        
+        
             
         j+=1
-    return SR_prec_plot
+    SR_prec_clu_plot=np.divide(SR_prec_clu_plot, SR_prec_clu_counter,where=SR_prec_clu_counter!=0)
+    return SR_prec_plot,SR_prec_clu_plot
 
 # Try labelling with the usual plugin- will help get the sizes etc. 
 
@@ -181,8 +196,8 @@ for path in pathlist:
     # Peform cluster analysis on the data
     clusters=cluster(coords)
     
-    SR=generate_SR(coords,clusters)
-    SR_prec=generate_SR_prec(coords,clusters)
+    SR,SR_Clu=generate_SR(coords,clusters)
+    SR_prec,SR_prec_clu_plot=generate_SR_prec(coords,clusters)
     
     
     
@@ -191,9 +206,17 @@ for path in pathlist:
     imsr = Image.fromarray(SR_prec)
     imsr.save(path+'SR_from_python.tif')
     
+    imsr = Image.fromarray(SR_prec_clu_plot)
+    imsr.save(path+'SR_clusters_FWHM.tif')
+    
+    imsr = Image.fromarray(SR_Clu)
+    imsr.save(path+'SR_clusters.tif')
     
     ims = Image.fromarray(SR)
     ims.save(path+'SR_points.tif')
+    
+    
+    
     
     
     # How many localisations per cluster?
@@ -223,8 +246,8 @@ for path in pathlist:
     
     # This is to perform some distance analysis etc. 
     
-    binary=threshold_image_fixed(SR_prec,0.01)
-    number,labelled=label_image(binary)
+    # binary=threshold_image_fixed(SR_prec,0.01)
+    labelled=SR_prec_clu_plot.astype('int')
     
     measurements=analyse_labelled_image(labelled,SR_prec)
     
@@ -232,7 +255,7 @@ for path in pathlist:
     # Make and save histograms
     
     areas=measurements['area']*((Pixel_size/(scale*1000))**2)
-    plt.hist(areas, bins = 20,range=[0,0.5], rwidth=0.9,color='#ff0000')
+    plt.hist(areas, bins = 20,range=[0,0.1], rwidth=0.9,color='#ff0000')
     plt.xlabel('Area (\u03bcm$^2$)',size=20)
     plt.ylabel('Number of Features',size=20)
     plt.title('Cluster area',size=20)
@@ -246,7 +269,7 @@ for path in pathlist:
     
     
     length=measurements['major_axis_length']*((Pixel_size/8))
-    plt.hist(length, bins = 20,range=[0,1000], rwidth=0.9,color='#ff0000')
+    plt.hist(length, bins = 20,range=[0,500], rwidth=0.9,color='#ff0000')
     plt.xlabel('Length (nm)',size=20)
     plt.ylabel('Number of Features',size=20)
     plt.title('Cluster lengths',size=20)
@@ -270,6 +293,9 @@ for path in pathlist:
     std_ratio=ratio.std()
     
     
+    measurements['Eccentricity']=ratio
+    measurements['Number_of_locs']=cluster_contents
+    measurements.to_csv(path + '/' + 'Metrics.csv', sep = '\t')
     
     Output_overall = pd.DataFrame(columns=['xw','yw','cluster'])
     
@@ -286,3 +312,12 @@ for path in pathlist:
                                         'Ratio_mean':mean_ratio,'Ratio_sd':std_ratio,'Ratio_med':median_ratio},ignore_index=True)
 
 Output_all_cases.to_csv(overall_root + '/' + 'all_metrics.csv', sep = '\t')
+
+
+
+
+
+
+
+
+
